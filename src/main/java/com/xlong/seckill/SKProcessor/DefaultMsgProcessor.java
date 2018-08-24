@@ -8,6 +8,7 @@ import com.xlong.seckill.repository.OrderRepository;
 import com.xlong.seckill.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.util.concurrent.locks.ReentrantLock;
 
 
 public class DefaultMsgProcessor implements MessageProcessor {
@@ -20,8 +21,10 @@ public class DefaultMsgProcessor implements MessageProcessor {
     @Autowired
     OrderRepository orderRepository;
 
+    private static ReentrantLock lock = new ReentrantLock();
+
     @Override
-    public synchronized void handleMessage(String msg) {
+    public void handleMessage(String msg) {
         // 解析消息得到用户id和商品id
         int userId = 0;
         int itemId = 0;
@@ -38,18 +41,30 @@ public class DefaultMsgProcessor implements MessageProcessor {
             return ;
         }
 
-        User user = userRepository.findById(userId);
-        Item item = itemRepository.findById(itemId);
+        User user;
+        Item item;
 
-        System.out.println(user);
-        System.out.println(item);
+        lock.lock();
+        try {
+            user = userRepository.findById(userId);
+            item = itemRepository.findById(itemId);
 
-        // 检查商品库存，如果库存不足，则直接返回
-        if (item.getStore() == 0) {
-            return ;
+            System.out.println(user);
+            System.out.println(item);
+
+            // 检查商品库存，如果库存不足，则直接返回
+            if (item.getStore() == 0) {
+                return ;
+            }
+
+            // 商品库存减1
+            item.setStore(item.getStore() - 1);
+            itemRepository.saveAndFlush(item);
+        } finally {
+            lock.unlock();
         }
 
-        // 生成订单，商品库存减1，写回数据库
+        // 生成订单，写回数据库
         Order order = new Order();
         order.setItemId(itemId);
         order.setUserId(userId);
@@ -59,9 +74,6 @@ public class DefaultMsgProcessor implements MessageProcessor {
 
         System.out.println(order);
 
-        item.setStore(item.getStore() - 1);
-
-        itemRepository.saveAndFlush(item);
         orderRepository.saveAndFlush(order);
     }
 }
